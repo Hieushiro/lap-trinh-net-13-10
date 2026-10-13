@@ -1,0 +1,186 @@
+namespace bai7_13_10
+{
+    public partial class Form1 : Form
+    {
+        public Form1()
+        {
+            InitializeComponent();
+            
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+
+        }
+        private async Task<List<string>> LoadDataHeavyAsync(IProgress<int> progress)
+        {
+            List<string> result = new List<string>();
+
+            // Giả lập vòng lặp tải 100 gói dữ liệu
+            for (int i = 1; i <= 100; i++)
+            {
+                // Dùng Task.Run để đẩy việc chạy ngầm, Task.Delay để giả lập mất thời gian (Ví dụ: 30 mili-giây/gói)
+                await Task.Run(() => Task.Delay(30).Wait());
+
+                // Gán dữ liệu giả lập vào danh sách kết quả
+                if (i % 20 == 0) result.Add($"Dữ liệu sinh viên gói {i / 20}");
+
+                // Báo cáo phần trăm hoàn thành (i tương đương với 1% -> 100%) về UI Thread
+                if (progress != null)
+                {
+                    progress.Report(i);
+                }
+            }
+
+            return result;
+        }
+
+        // 2. Sự kiện Click nút bấm - Xử lý bất đồng bộ kết hợp Quản lý giao diện
+        private async void btnLoadData_Click(object sender, EventArgs e)
+        {
+            // KHÓA GIAO DIỆN: Vô hiệu hóa nút bấm để tránh người dùng kích hoạt trùng lặp
+            btnLoadData.Enabled = false;
+            progressBar1.Value = 0;
+            lblPercent.Text = "0%";
+            NotifyParent("Bắt đầu nạp dữ liệu lớn...");
+
+            try
+            {
+                // Khởi tạo đối tượng Progress lắng nghe tiến độ từ tiến trình ngầm gửi về
+                var progressIndicator = new Progress<int>(value =>
+                {
+                    // Phần code này tự động chạy an toàn trên UI Thread
+                    progressBar1.Value = value;         // Cập nhật thanh ProgressBar trên Form con
+                    lblPercent.Text = $"{value}%";       // Cập nhật nhãn phần trăm trên Form con
+
+                    // Cập nhật đồng thời lên thanh StatusStrip của Form cha MDI
+                    NotifyParent($"Đang tải dữ liệu... {value}%");
+                });
+
+                // Gọi hàm chạy ngầm bất đồng bộ và ĐỢI (await) cho tới khi hoàn tất hoàn toàn
+                List<string> dataFetched = await LoadDataHeavyAsync(progressIndicator);
+
+                // Sau khi await xong, nạp kết quả vào DataGridView
+                dgvData.Rows.Clear();
+                if (dgvData.Columns.Count == 0) dgvData.Columns.Add("DataColumn", "Danh sách đã tải");
+                foreach (string item in dataFetched)
+                {
+                    dgvData.Rows.Add(item);
+                }
+
+                NotifyParent("Đã tải xong toàn bộ dữ liệu mẫu!");
+                MessageBox.Show("Nạp dữ liệu hoàn tất thành công!", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                NotifyParent("Xảy ra lỗi trong quá trình nạp dữ liệu.");
+                MessageBox.Show($"Lỗi tải dữ liệu: {ex.Message}", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                // MỞ LẠI GIAO DIỆN: Luôn luôn kích hoạt lại nút bấm dù chạy thành công hay gặp lỗi
+                btnLoadData.Enabled = true;
+            }
+        }
+
+        // Hàm phụ hỗ trợ gửi thông điệp hiển thị lên StatusStrip của Form cha MDI (Từ Bài 4.7)
+        private void NotifyParent(string message)
+        {
+            FormChild mainForm = this.MdiParent as FormChild;
+            if (mainForm != null)
+            {
+                mainForm.UpdateStatusMessage(message);
+            }
+        }
+    }
+}
+///////////////////////////
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Text;
+using System.Windows.Forms;
+
+namespace bai7_13_10
+{
+    public partial class FormChild : Form
+    {
+        public FormChild()
+        {
+            InitializeComponent();
+        }
+
+        private void statusStrip1_ItemClicked(object sender, ToolStripItemClickedEventArgs e)
+        {
+
+        }
+
+        private void FormChild_Load(object sender, EventArgs e)
+        {
+
+        }
+        private void OpenChildForm(Type formType)
+        {
+            // Duyệt danh sách các Form con đang mở xem có cái nào trùng loại không
+            foreach (Form child in this.MdiChildren)
+            {
+                if (child.GetType() == formType)
+                {
+                    child.Activate(); // Nếu đã mở rồi thì chỉ đẩy lên trên cùng
+                    return;          // Thoát hàm luôn, không tạo mới
+                }
+            }
+
+            // Nếu chưa tồn tại thì tiến hành khởi tạo mới hoàn toàn
+            Form newChild = (Form)Activator.CreateInstance(formType);
+            newChild.MdiParent = this; // Đặt FormMain hiện tại làm cha quản lý
+            newChild.Show();
+
+            UpdateStatusMessage($"Đã mở cửa sổ mới: {newChild.Text}");
+        }
+
+        // Hàm Public (Công khai) để các Form con đứng từ xa gọi vào sửa chữ dưới đáy
+        public void UpdateStatusMessage(string message)
+        {
+            lblStatus.Text = $"Trạng thái: {message} | Cập nhật lúc: {DateTime.Now.ToLongTimeString()}";
+        }
+
+        // Sự kiện click mở Form từ thanh Menu
+        private void menuOpenChild_Click(object sender, EventArgs e)
+        {
+            OpenChildForm(typeof(FormChild));
+        }
+
+        // Sự kiện click mở Form từ nút tắt ToolStrip
+        private void tsBtnOpenChild_Click(object sender, EventArgs e)
+        {
+            OpenChildForm(typeof(FormChild));
+        }
+
+        // --- Các sự kiện sắp xếp bố cục đa cửa sổ con ---
+        private void menuCascade_Click(object sender, EventArgs e)
+        {
+            this.LayoutMdi(MdiLayout.Cascade);
+        }
+
+        private void menuTileH_Click(object sender, EventArgs e)
+        {
+            this.LayoutMdi(MdiLayout.TileHorizontal);
+        }
+
+        private void menuTileV_Click(object sender, EventArgs e)
+        {
+            this.LayoutMdi(MdiLayout.TileVertical);
+        }
+
+        // Thoát ứng dụng hoàn toàn
+        private void menuExit_Click(object sender, EventArgs e)
+        {
+            Application.Exit();
+        }
+    }
+}
+    
+
